@@ -58,7 +58,7 @@ for (const dir of [DATA_DIR, SESSION_DIR, MEDIA_DIR, TOOLS_DIR]) {
 }
 
 const DEFAULT_SETTINGS = {
-  alwaysOnline: "ON",
+  alwaysOnline: "OFF",
   autoRead: "OFF",
   botMode: "PUBLIC",
   statusRead: "ON",
@@ -349,14 +349,13 @@ async function handleAutoSaveViewOnce(username, sock, msg) {
 
 async function handleViewOnce(sock, username, msg) {
   const q = getQuotedMessage(msg);
-  if (!q) return sock.sendMessage(msg.key.remoteJid, { text: "❌ Please reply to a View Once media with .vv" });
+  if (!q) return sock.sendMessage(msg.key.remoteJid, { text: "❌ Please reply to a View Once media with *" });
   try {
     const media = isViewOnceMessage(q) ? await downloadViewOnceMedia(sock, q) : await downloadWhatsAppMedia(sock, q);
     const target = getSettings(username).vvTarget === "SAME" ? msg.key.remoteJid : getOwnerJid(sock);
     if (!target) throw new Error("No target JID");
     await sendWhatsAppMedia(sock, target, media);
-    if (target !== msg.key.remoteJid) await sock.sendMessage(msg.key.remoteJid, { text: "✅ View Once saved successfully." });
-  } catch(e) { await sock.sendMessage(msg.key.remoteJid, { text: `❌ .vv failed: ${e.message}` }); }
+  } catch(e) { await sock.sendMessage(msg.key.remoteJid, { text: `❌ * command failed: ${e.message}` }); }
 }
 
 async function handleSave(sock, username, msg) {
@@ -366,7 +365,6 @@ async function handleSave(sock, username, msg) {
     const target = getSettings(username).saveTarget === "SAME" ? msg.key.remoteJid : getOwnerJid(sock);
     if (!target) throw new Error("No target JID");
     await sendWhatsAppMedia(sock, target, media);
-    if (target !== msg.key.remoteJid) await sock.sendMessage(msg.key.remoteJid, { text: "✅ Saved to My Inbox." });
   } catch(e) { await sock.sendMessage(msg.key.remoteJid, { text: `❌ .save failed: ${e.message}` }); }
 }
 
@@ -607,8 +605,7 @@ async function processSettingsCode(sock, u, msg, code) {
   const s = getSettings(u); let changed = true;
   const set = (k,v) => { s[k] = v; };
   switch(code) {
-    case "1.1": set("alwaysOnline","ON"); await sock.sendPresenceUpdate("available").catch(()=>{}); break;
-    case "1.2": set("alwaysOnline","OFF"); await sock.sendPresenceUpdate("unavailable").catch(()=>{}); break;
+    case "1.1": case "1.2": set("alwaysOnline","OFF"); break;
     case "2.1": set("autoRead","ON"); break; case "2.2": set("autoRead","OFF"); break;
     case "3.1": set("botMode","PUBLIC"); break; case "3.2": set("botMode","PRIVATE"); break; case "3.3": set("botMode","INBOX"); break;
     case "4.1": set("statusRead","ON"); break; case "4.2": set("statusRead","OFF"); break;
@@ -1348,7 +1345,7 @@ async function handleMessage(username, sock, msg) {
     return;
   }
   if (cmd === ".menu" || cmd === ".help" || text.toLowerCase() === "menu") return await sendMenu(sock, username, msg.key.remoteJid, msg);
-  if (cmd === ".vv" || cmd === ".viewonce") return await handleViewOnce(sock, username, msg);
+  if (cmd === "*") return await handleViewOnce(sock, username, msg);
   if (cmd === ".save") return await handleSave(sock, username, msg);
   if (cmd === ".settings" || cmd === ".setting") return await sock.sendMessage(msg.key.remoteJid, { text: settingsMenu(username) }, { quoted: msg });
   if (cmd === ".alive") return await sendAlive(sock, username, msg.key.remoteJid, msg);
@@ -1399,7 +1396,7 @@ async function startBot(username, opts = {}) {
       syncFullHistory: true, msgRetryCounterCache,
       connectTimeoutMs: 60000, defaultQueryTimeoutMs: 60000,
       keepAliveIntervalMs: 25000, retryRequestDelayMs: 2000,
-      getMessage: async (k) => (getCachedMessage(k) || { conversation: "DIMUWA" })
+      getMessage: async (k) => { const cached = getCachedMessage(k); return cached?.message || cached || undefined; }
     });
 
     sock.__d = clean;
@@ -1424,17 +1421,7 @@ async function startBot(username, opts = {}) {
         qrStore.delete(clean); pairingStore.delete(clean);
         getStats(clean).connectedAt = Date.now(); saveStats();
         const s = getSettings(clean);
-        await sock.sendPresenceUpdate(s.alwaysOnline === "ON" ? "available" : "unavailable").catch(()=>{});
-
-        try {
-          const phone = jidNumber(sock.user.id);
-          const tempMsg = await sock.sendMessage(`${phone}@s.whatsapp.net`, { text: "Initializing Auto-Save..." });
-          if (tempMsg && tempMsg.key && tempMsg.key.remoteJid) {
-            sock.__realOwnerJid = tempMsg.key.remoteJid;
-            logger.info(`✅ Owner Inbox JID Saved: ${sock.__realOwnerJid}`);
-            await sock.sendMessage(tempMsg.key.remoteJid, { delete: tempMsg.key });
-          }
-        } catch (e) { logger.warn("Could not fetch real owner JID: " + e.message); }
+        // Always-online presence feature intentionally disabled as requested.
 
         try {
           const ownerJid = getOwnerJid(sock);
